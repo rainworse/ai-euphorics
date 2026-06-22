@@ -1,5 +1,7 @@
 import os
+import random
 
+import numpy as np
 import torch
 from PIL import Image
 from matplotlib import pyplot as plt
@@ -30,6 +32,23 @@ def display_images(images):
     plt.imshow(grid.permute(1, 2, 0), vmin=0, vmax=1)
     plt.axis("off")
     plt.show()
+
+
+def pixels_to_pil(img_pixels):
+    arr = np.asarray(img_pixels.clone().detach())
+    if arr.shape[0] == 3:  # CHW -> HWC
+        arr = arr.transpose(1, 2, 0)
+    if arr.dtype != np.uint8:
+        arr = (arr * 255 if arr.max() <= 1.0 else arr).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(arr)
+
+def shuffle_image_dict(images):
+    shuffled_image_dict = []
+    for idx, img in enumerate(images):
+        shuffled_image_dict.append({'original_idx': idx, 'img_pixels': img})
+
+    random.shuffle(shuffled_image_dict)
+    return shuffled_image_dict
 
 def create_noise_image(device, shape=(3, 256, 256)):
     return torch.rand(shape, requires_grad=True).to(device)

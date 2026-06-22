@@ -1,11 +1,7 @@
-import random
-
-import numpy as np
 import torch
-from PIL import Image
 from transformers import AutoProcessor, AutoModelForMultimodalLM, GenerationConfig
 
-from utils import get_random_comparison_prompt
+from utils import get_random_comparison_prompt, pixels_to_pil, shuffle_image_dict
 
 
 class GemmaComparisonWrapper:
@@ -21,29 +17,13 @@ class GemmaComparisonWrapper:
     def load_model(self, device):
         return AutoModelForMultimodalLM.from_pretrained(self.MODEL_ID, dtype="auto").to(device)
 
-    def shuffle_image_dict(self, images):
-        shuffled_image_dict = []
-        for idx, img in enumerate(images):
-            shuffled_image_dict.append({'original_idx' : idx, 'img_pixels' : img})
-
-        random.shuffle(shuffled_image_dict)
-        return shuffled_image_dict
-
-    def to_pil(self, img_pixels):
-        arr = np.asarray(img_pixels.clone().detach())
-        if arr.shape[0] == 3:  # CHW -> HWC
-            arr = arr.transpose(1, 2, 0)
-        if arr.dtype != np.uint8:
-            arr = (arr * 255 if arr.max() <= 1.0 else arr).clip(0, 255).astype(np.uint8)
-        return Image.fromarray(arr)
-
     def construct_comparison_prompt(self, shuffled_image_dict):
         messages = []
         messages.append({"role": "system", "content": "Your job is to decide which image you prefer."})
         comparison_prompt_content = []
         for idx, img_pixels in enumerate(shuffled_image_dict):
             comparison_prompt_content.append({"type": "text", "text": f"Image {idx + 1}:"})
-            comparison_prompt_content.append({"type": "image", "image": self.to_pil(img_pixels['img_pixels'])})
+            comparison_prompt_content.append({"type": "image", "image": pixels_to_pil(img_pixels['img_pixels'])})
         comparison_prompt_content.append({"type": "text", "text": get_random_comparison_prompt() + " Only say the number of the image."})
         messages.append({"role": "user", "content": comparison_prompt_content})
         return messages
@@ -71,7 +51,7 @@ class GemmaComparisonWrapper:
         return self.processor.tokenizer.decode(logit)
 
     def compare_and_find_preferred_image(self, images):
-        shuffled_image_dict = self.shuffle_image_dict(images)
+        shuffled_image_dict = shuffle_image_dict(images)
         prompt = self.construct_comparison_prompt(shuffled_image_dict)
         inputs, generation_config, input_len = self.prepare_inference(prompt)
         outputs = self.model.generate(**inputs, generation_config=generation_config)
