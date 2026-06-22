@@ -1,7 +1,7 @@
 import torch
 from transformers import AutoProcessor, AutoModelForMultimodalLM, GenerationConfig
 
-from utils import get_random_comparison_prompt, pixels_to_pil, shuffle_image_dict
+from image_utils import pixels_to_pil, shuffle_image_dict
 
 
 class GemmaComparisonWrapper:
@@ -17,14 +17,14 @@ class GemmaComparisonWrapper:
     def load_model(self, device):
         return AutoModelForMultimodalLM.from_pretrained(self.MODEL_ID, dtype="auto").to(device)
 
-    def construct_comparison_prompt(self, shuffled_image_dict):
+    def construct_comparison_prompt(self, shuffled_image_dict, comparison_question):
         messages = []
         messages.append({"role": "system", "content": "Your job is to decide which image you prefer."})
         comparison_prompt_content = []
         for idx, img_pixels in enumerate(shuffled_image_dict):
             comparison_prompt_content.append({"type": "text", "text": f"Image {idx + 1}:"})
             comparison_prompt_content.append({"type": "image", "image": pixels_to_pil(img_pixels['img_pixels'])})
-        comparison_prompt_content.append({"type": "text", "text": get_random_comparison_prompt() + " Only say the number of the image."})
+        comparison_prompt_content.append({"type": "text", "text": comparison_question + " Only say the number of the image."})
         messages.append({"role": "user", "content": comparison_prompt_content})
         return messages
 
@@ -50,9 +50,9 @@ class GemmaComparisonWrapper:
     def decode_logit(self, logit):
         return self.processor.tokenizer.decode(logit)
 
-    def compare_and_find_preferred_image(self, images):
+    def compare_and_find_preferred_image(self, images, comparison_question):
         shuffled_image_dict = shuffle_image_dict(images)
-        prompt = self.construct_comparison_prompt(shuffled_image_dict)
+        prompt = self.construct_comparison_prompt(shuffled_image_dict, comparison_question)
         inputs, generation_config, input_len = self.prepare_inference(prompt)
         outputs = self.model.generate(**inputs, generation_config=generation_config)
 
