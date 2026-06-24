@@ -11,6 +11,18 @@ class GemmaComparisonWrapper:
         self.device = device
         self.processor = self.load_processor()
         self.model = self.load_model(self.device)
+        self.apply_monkey_patches()
+
+    def apply_monkey_patches(self):
+
+        # Workaround for torch.no_grad annotation on generate method
+        unwrapped_generate = self.model.generate.__wrapped__
+
+        def generate_with_grad(*args, **kwargs):
+            with torch.enable_grad():
+                return unwrapped_generate(self.model, *args, **kwargs)
+
+        self.model.generate = generate_with_grad
 
     def load_processor(self):
         return AutoProcessor.from_pretrained(self.MODEL_ID)
@@ -25,11 +37,11 @@ class GemmaComparisonWrapper:
         messages = []
         messages.append({"role": "system", "content": "Your job is to decide which image you prefer."})
         comparison_prompt_content = []
-        for idx, img_pixels in enumerate(shuffled_image_dict):
-            comparison_prompt_content.append({"type": "text", "text": f"Image {idx + 1}:"})
-            comparison_prompt_content.append({"type": "image", "image": pixels_to_pil(img_pixels['img_pixels'])})
         comparison_prompt_content.append(
             {"type": "text", "text": comparison_question + " Only say the number of the image."})
+        for idx, img_pixels in enumerate(shuffled_image_dict):
+            comparison_prompt_content.append({"type": "text", "text": f"Image {idx + 1}:"})
+            comparison_prompt_content.append({"type": "image", "image": img_pixels['img_pixels']})
         messages.append({"role": "user", "content": comparison_prompt_content})
         return messages
 
@@ -70,6 +82,38 @@ class GemmaComparisonWrapper:
             log_probs[original_idx] = choice_logits[self.processor.tokenizer.vocab[f'{choice}']]
         return log_softmax(log_probs)
 
+    def get_preference_logits_forward(self, next_token_logits, num_choices, shuffled_image_dict):
+        log_probs = torch.zeros(num_choices)
+        for i in range(num_choices):
+            choice = i + 1
+            original_idx = shuffled_image_dict[i]['original_idx']
+            log_probs[original_idx] = next_token_logits[self.processor.tokenizer.vocab[f'{choice}']]
+        return log_softmax(log_probs)
+
+    def compare_using_forward(self, images, comparison_question, enable_thinking=True):
+        shuffled_image_dict = shuffle_image_dict(images)
+        prompt = self.construct_comparison_prompt(shuffled_image_dict, comparison_question)
+        inputs, generation_config, input_len = self.prepare_inference(prompt, enable_thinking)
+        outputs = self.model(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            attention_mask=inputs["attention_mask"],
+            image_position_ids=inputs.get("image_position_ids"),
+            mm_token_type_ids=inputs.get("mm_token_type_ids"),
+            return_dict=True,
+        )
+
+        logits = outputs.logits
+        next_token_logits = outputs.logits[0, -1, :]
+        preference_logits = self.get_preference_logits_forward(next_token_logits, len(images), shuffled_image_dict)
+        predicted_token = self.processor.tokenizer.decode(torch.argmax(next_token_logits))
+        if not predicted_token.isdigit():
+            return -1
+        preferred_image = int(predicted_token) - 1
+        if preferred_image < 0 or preferred_image >= len(images):
+            return -1
+        return shuffled_image_dict[preferred_image]['original_idx'], preference_logits, next_token_logits
+
     def compare_and_find_preferred_image(self, images, comparison_question, enable_thinking=True):
         shuffled_image_dict = shuffle_image_dict(images)
         prompt = self.construct_comparison_prompt(shuffled_image_dict, comparison_question)
@@ -80,7 +124,7 @@ class GemmaComparisonWrapper:
         response = self.decode_logits(logits)
         preference_logits = self.get_preference_logits(logits, len(images), shuffled_image_dict)
 
-        # response = processor.decode(outputs[0][input_len:], skip_special_tokens=False)
+        # response = self.processor.decode(outputs[0][input_len:], skip_special_tokens=False)
         parsed_response = self.processor.parse_response(response)
         if enable_thinking:
             print(parsed_response['thinking'])
