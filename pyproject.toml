@@ -3,12 +3,23 @@ name = "ai-euphorics"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "accelerate>=1.14.0",
     "matplotlib>=3.11.0",
     "pillow>=12.2.0",
-    "torch>=2.12.1",
-    "torchvision>=0.27.1",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+    "torchaudio>=2.11.0",
     "transformers>=5.12.1",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

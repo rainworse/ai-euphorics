@@ -25,9 +25,10 @@ def load_and_resize_images(folder, device, size=(256, 256)):
 
 def display_images(images):
     if type(images) is  list:
-        batch = torch.stack(images)
+        batch = torch.stack(images).detach().to('cpu')
     else:
         batch = images
+
     grid = make_grid(batch, nrow=4)
 
     plt.close('all')
